@@ -154,6 +154,16 @@ curl -o install.sh -L https://raw.githubusercontent.com/devmrzero/botzeropanel/m
 
 ---
 
+## 🔄 Update Bot To Beta Version
+
+To update your bot to the latest version, use the following command:
+
+```bash
+curl -o install.sh -L https://raw.githubusercontent.com/devmrzero/botzeropanel/main/install.sh && bash install.sh -update -beta
+```
+
+---
+
 ## ❌ removing
 
 If you want to completely remove the bot from your server, run the following command:
