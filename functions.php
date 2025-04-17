@@ -174,6 +174,8 @@ function outputlunk($text){
     curl_setopt($ch, CURLOPT_URL, $text);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
     $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
     curl_setopt($ch, CURLOPT_USERAGENT, $userAgent);
     $response = curl_exec($ch);
@@ -250,7 +252,11 @@ function DirectPayment($order_id){
             }
         }
         $Shoppinginfo = json_encode($Shoppinginfo);
-        $textcreatuser = sprintf($textbotlang['users']['buy']['createservice'],$dataoutput['username'],$get_invoice['name_product'],$marzban_list_get['name_panel'],$get_invoice['Service_time'],$get_invoice['Volume'],$config,$output_config_link);
+        if($marzban_list_get['type'] == "wgdashboard"){
+            $textcreatuser = sprintf($textbotlang['users']['buy']['createservicewgbuy'],$dataoutput['username'],$get_invoice['name_product'],$marzban_list_get['name_panel'],$get_invoice['Service_time'],$get_invoice['Volume']);
+        }else{
+            $textcreatuser = sprintf($textbotlang['users']['buy']['createservice'],$dataoutput['username'],$get_invoice['name_product'],$marzban_list_get['name_panel'],$get_invoice['Service_time'],$get_invoice['Volume'],$config,$output_config_link);
+        }
         if ($marzban_list_get['configManual'] == "onconfig") {
             if (count($dataoutput['configs']) == 1) {
                 $urlimage = "{$get_invoice['id_user']}$randomString.png";
@@ -293,6 +299,12 @@ function DirectPayment($order_id){
                 'caption' => $textcreatuser,
                 'parse_mode' => "HTML",
             ]);
+            if($marzban_list_get['type'] == "wgdashboard"){
+                $urlimage = "{$marzban_list_get['inboundid']}_{$dataoutput['username']}.conf";
+                file_put_contents($urlimage,$output_config_link);
+                sendDocument($get_invoice['id_user'], $urlimage,$textbotlang['users']['buy']['configwg']);
+                unlink($urlimage);
+            }
             unlink($urlimage);
         }
         $partsdic = explode("_", $Balance_id['Processing_value_four']);
@@ -437,4 +449,39 @@ function channel($id_channel){
     }else{
         return $channel_link;
     }
+}
+function addFieldToTable($tableName, $fieldName, $defaultValue = null , $datatype = "VARCHAR(500)") {
+    global $pdo;
+    $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM information_schema.tables WHERE table_name = :tableName");
+    $stmt->bindParam(':tableName', $tableName);
+    $stmt->execute();
+    $tableExists = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($tableExists['count'] == 0)return;
+    $stmt = $pdo->prepare("SELECT COUNT(*) as count FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?");
+    $stmt->execute([$pdo->query("SELECT DATABASE()")->fetchColumn(), $tableName, $fieldName]);
+    $filedExists = $stmt->fetch(PDO::FETCH_ASSOC);
+    if($filedExists['count'] != 0)return;
+    $query = "ALTER TABLE $tableName ADD $fieldName $datatype";
+    $statement = $pdo->prepare($query);
+    $statement->execute();
+    if($defaultValue != null){
+        $stmt = $pdo->prepare("UPDATE $tableName SET $fieldName= ?");
+        $stmt->bindParam(1, $defaultValue);
+        $stmt->execute();
+    }
+    echo "The $fieldName field was added ✅";
+}
+
+function publickey(){
+    $privateKey = sodium_crypto_box_keypair();
+    $privateKeyEncoded = base64_encode(sodium_crypto_box_secretkey($privateKey));
+    $publicKey = sodium_crypto_box_publickey($privateKey);
+    $publicKeyEncoded = base64_encode($publicKey);
+    $presharedKey = base64_encode(random_bytes(32));
+    return [
+        'private_key' => $privateKeyEncoded,
+        'public_key' => $publicKeyEncoded,
+        'preshared_key' => $presharedKey
+    ];
+
 }

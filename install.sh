@@ -11,7 +11,7 @@ function show_logo() {
     clear
     echo -e "\033[1;34m"
     echo "========================================"
-    echo "           zero INSTALL SCRIPT         "
+    echo "           ZeRo INSTALL SCRIPT         "
     echo "========================================"
     echo -e "\033[0m"
     echo ""
@@ -65,11 +65,19 @@ function check_marzban_installed() {
 # Detect database type for Marzban
 function detect_database_type() {
     COMPOSE_FILE="/opt/marzban/docker-compose.yml"
-    if grep -q "mysql:" "$COMPOSE_FILE"; then
-        return 0  # MySQL detected
+    if [ ! -f "$COMPOSE_FILE" ]; then
+        echo "unknown"  # File not found, cannot determine database type
+        return 1
+    fi
+    if grep -q "^[[:space:]]*mysql:" "$COMPOSE_FILE"; then
+        echo "mysql"
+        return 0
+    elif grep -q "^[[:space:]]*mariadb:" "$COMPOSE_FILE"; then
+        echo "mariadb"
+        return 1
     else
-        echo -e "\033[31m[ERROR] Marzban is installed but MySQL database is not present. Installation cannot proceed.\033[0m"
-        exit 1
+        echo "sqlite"  # Assume SQLite if neither MySQL nor MariaDB is found
+        return 1
     fi
 }
 
@@ -126,6 +134,11 @@ function install_bot() {
     }
     echo -e "\e[92mThe server was successfully updated ...\033[0m\n"
 
+    sudo apt-get install software-properties-common || {
+        echo -e "\e[91mError: Failed to install software-properties-common.\033[0m"
+        exit 1
+    }
+    
     sudo apt install -y git unzip curl || {
         echo -e "\e[91mError: Failed to install required packages.\033[0m"
         exit 1
@@ -625,7 +638,6 @@ echo -e "$text_to_save" >> /var/www/html/zerobotconfig/config.php
 
 }
 
-
 function install_bot_with_marzban() {
     # Display warning and confirmation
     echo -e "\033[41m[IMPORTANT WARNING]\033[0m \033[1;33mMarzban panel is detected on your server. Please make sure to backup the Marzban database before installing zero Bot.\033[0m"
@@ -635,16 +647,27 @@ function install_bot_with_marzban() {
         exit 0
     fi
 
-    echo -e "\e[32mInstalling zero Bot alongside Marzban...\033[0m\n"
+    # Check database type
+    echo -e "\e[32mChecking Marzban database type...\033[0m"
+    DB_TYPE=$(detect_database_type)
+    if [ "$DB_TYPE" != "mysql" ]; then
+        echo -e "\e[91mError: Your database is $DB_TYPE. To install zero Bot, you must use MySQL.\033[0m"
+        echo -e "\e[93mPlease configure Marzban to use MySQL and try again.\033[0m"
+        exit 1
+    fi
+    echo -e "\e[92mMySQL detected. Proceeding with installation...\033[0m"
 
     # Check if port 80 is free before proceeding
-    echo -e "\e[32mChecking port 80 availability...\033[0m"
-    if sudo netstat -tuln | grep -q ":80 "; then
-        echo -e "\e[91mError: Port 80 is already in use. Please free port 80 (e.g., stop any service using it like Marzban's HTTP) and run the script again.\033[0m"
+    echo -e "\e[32mChecking port availability...\033[0m"
+    if sudo ss -tuln | grep -q ":80 "; then
+        echo -e "\e[91mError: Port 80 is already in use. Please free port 80 and run the script again.\033[0m"
         exit 1
-    else
-        echo -e "\e[92mPort 80 is free. Proceeding with installation...\033[0m"
     fi
+    if sudo ss -tuln | grep -q ":88 "; then
+        echo -e "\e[91mError: Port 88 is already in use. Please free port 88 and run the script again.\033[0m"
+        exit 1
+    fi
+    echo -e "\e[92mPorts 80 and 88 are free. Proceeding with installation...\033[0m"
 
     # Update system and upgrade packages
     sudo apt update && sudo apt upgrade -y || {
@@ -652,6 +675,23 @@ function install_bot_with_marzban() {
         exit 1
     }
     echo -e "\e[92mSystem updated successfully...\033[0m\n"
+
+    sudo apt-get install software-properties-common || {
+        echo -e "\e[91mError: Failed to install software-properties-common.\033[0m"
+        exit 1
+    }
+
+    # Install MySQL client if not already installed
+    echo -e "\e[32mChecking and installing MySQL client...\033[0m"
+    if ! command -v mysql &>/dev/null; then
+        sudo apt install -y mysql-client || {
+            echo -e "\e[91mError: Failed to install MySQL client. Please install it manually and try again.\033[0m"
+            exit 1
+        }
+        echo -e "\e[92mMySQL client installed successfully.\033[0m"
+    else
+        echo -e "\e[92mMySQL client is already installed.\033[0m"
+    fi
 
     # Add Ondřej Surý PPA for PHP 8.2
     sudo apt install -y software-properties-common || {
@@ -696,6 +736,11 @@ function install_bot_with_marzban() {
         exit 1
     }
 
+    sudo apt install -y python3-certbot-apache || {
+        echo -e "\e[91mError: Failed to install Certbot for Apache.\033[0m"
+        exit 1
+    }
+
     # Install UFW if not present
     if ! dpkg -s ufw &>/dev/null; then
         sudo apt install -y ufw || {
@@ -731,16 +776,64 @@ function install_bot_with_marzban() {
         exit 1
     fi
 
-    # Test MySQL connection inside Docker container
     echo "Testing MySQL connection..."
-    docker exec "$MYSQL_CONTAINER" bash -c "echo 'SELECT 1;' | mysql -u '$ROOT_USER' -p'$MYSQL_ROOT_PASSWORD'" 2>/dev/null || {
-        echo -e "\e[91mError: Failed to connect to MySQL in Marzban Docker container.\033[0m"
-        echo -e "\e[93mPlease ensure the MySQL root password is correct and the container is running.\033[0m"
-        echo -e "\e[93mContainer found: $MYSQL_CONTAINER\033[0m"
-        echo -e "\e[93mPassword used: $MYSQL_ROOT_PASSWORD\033[0m"
-        exit 1
-    }
-    echo -e "\e[92mMySQL connection successful.\033[0m"
+
+    # Read MySQL root password from .env
+    if [ -f "/opt/marzban/.env" ]; then
+        MYSQL_ROOT_PASSWORD=$(grep -E '^MYSQL_ROOT_PASSWORD=' /opt/marzban/.env | cut -d '=' -f2- | tr -d '" \n\r')
+        if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
+            echo -e "\e[93mWarning: MYSQL_ROOT_PASSWORD not found in .env. Please enter it manually.\033[0m"
+            read -s -p "Enter MySQL root password: " MYSQL_ROOT_PASSWORD
+            echo
+        fi
+    else
+        echo -e "\e[93mWarning: .env file not found. Please enter MySQL root password manually.\033[0m"
+        read -s -p "Enter MySQL root password: " MYSQL_ROOT_PASSWORD
+        echo
+    fi
+
+    ROOT_USER="root"
+    echo -e "\e[32mUsing MySQL container: $(docker inspect -f '{{.Name}}' "$MYSQL_CONTAINER" | cut -c2-)\033[0m"
+
+    # Try connecting directly to host first (for mysql:latest with network_mode: host)
+    mysql -u "$ROOT_USER" -p"$MYSQL_ROOT_PASSWORD" -h 127.0.0.1 -P 3306 -e "SELECT 1;" 2>/tmp/mysql_error.log
+    if [ $? -eq 0 ]; then
+        echo -e "\e[92mMySQL connection successful (direct host method).\033[0m"
+    else
+        # If direct connection fails, try inside container (for mysql:lts)
+        if [ -n "$MYSQL_CONTAINER" ]; then
+            echo -e "\e[93mDirect connection failed, trying inside container...\033[0m"
+            docker exec "$MYSQL_CONTAINER" bash -c "echo 'SELECT 1;' | mysql -u '$ROOT_USER' -p'$MYSQL_ROOT_PASSWORD'" 2>/tmp/mysql_error.log
+            if [ $? -eq 0 ]; then
+                echo -e "\e[92mMySQL connection successful (container method).\033[0m"
+            else
+                echo -e "\e[91mError: Failed to connect to MySQL using both methods.\033[0m"
+                echo -e "\e[93mPassword used: '$MYSQL_ROOT_PASSWORD'\033[0m"
+                echo -e "\e[93mError details:\033[0m"
+                cat /tmp/mysql_error.log
+                echo -e "\e[93mPlease ensure MySQL is running and the root password is correct.\033[0m"
+                read -s -p "Enter the correct MySQL root password: " NEW_PASSWORD
+                echo
+                MYSQL_ROOT_PASSWORD="$NEW_PASSWORD"
+                # Retry with new password (direct method first)
+                mysql -u "$ROOT_USER" -p"$MYSQL_ROOT_PASSWORD" -h 127.0.0.1 -P 3306 -e "SELECT 1;" 2>/tmp/mysql_error.log || {
+                    docker exec "$MYSQL_CONTAINER" bash -c "echo 'SELECT 1;' | mysql -u '$ROOT_USER' -p'$MYSQL_ROOT_PASSWORD'" 2>/tmp/mysql_error.log || {
+                        echo -e "\e[91mError: Still can't connect with new password.\033[0m"
+                        echo -e "\e[93mError details:\033[0m"
+                        cat /tmp/mysql_error.log
+                        exit 1
+                    }
+                }
+                echo -e "\e[92mMySQL connection successful with new password.\033[0m"
+            fi
+        else
+            echo -e "\e[91mError: No MySQL container found and direct connection failed.\033[0m"
+            echo -e "\e[93mPassword used: '$MYSQL_ROOT_PASSWORD'\033[0m"
+            echo -e "\e[93mError details:\033[0m"
+            cat /tmp/mysql_error.log
+            exit 1
+        fi
+    fi
 
     # Ask for database username and password like Marzban
     clear
@@ -879,10 +972,6 @@ EOF
     DOMAIN_NAME="$domainname"
     echo -e "\e[92mDomain set to: $DOMAIN_NAME\033[0m"
 
-    sudo apt install -y letsencrypt python3-certbot-apache || {
-        echo -e "\e[91mError: Failed to install SSL tools.\033[0m"
-        exit 1
-    }
     sudo systemctl restart apache2 || {
         echo -e "\e[91mError: Failed to restart Apache2 before Certbot.\033[0m"
         exit 1
@@ -922,39 +1011,39 @@ EOF
         echo -e "\e[91mError: Failed to enable SSL site.\033[0m"
         exit 1
     }
+    # Force ports.conf to only listen on 88 before restarting Apache
+    sudo bash -c "echo -n > /etc/apache2/ports.conf"
+    cat <<EOF | sudo tee /etc/apache2/ports.conf
+Listen 88
+EOF
+    sudo apache2ctl configtest || {
+        echo -e "\e[91mError: Apache configuration test failed after Certbot.\033[0m"
+        exit 1
+    }
     sudo systemctl restart apache2 || {
         echo -e "\e[91mError: Failed to restart Apache2 after SSL configuration.\033[0m"
+        systemctl status apache2.service
         exit 1
     }
 
     # Disable port 80 after SSL is configured
     echo -e "\e[32mDisabling port 80 as it's no longer needed...\033[0m"
-    sudo bash -c "echo -n > /etc/apache2/ports.conf"  # Clear the file again
-    cat <<EOF | sudo tee /etc/apache2/ports.conf
-# If you just change the port or add more ports here, you will likely also
-# have to change the VirtualHost statement in
-# /etc/apache2/sites-enabled/000-default.conf
-
-Listen 88
-
-# vim: syntax=apache ts=4 sw=4 sts=4 sr noet
-EOF
-    if [ $? -ne 0 ]; then
-        echo -e "\e[91mError: Failed to reconfigure ports.conf.\033[0m"
-        exit 1
-    fi
-
-    # Remove port 80 VirtualHost from all config files
-    sudo sed -i '/<VirtualHost \*:80>/,/<\/VirtualHost>/d' /etc/apache2/sites-available/* || {
-        echo -e "\e[91mError: Failed to remove VirtualHost for port 80 from all config files.\033[0m"
+    # Ports.conf already set to Listen 88 in previous step, just verify
+    sudo a2dissite 000-default.conf || {
+        echo -e "\e[91mError: Failed to disable port 80 VirtualHost.\033[0m"
         exit 1
     }
     sudo ufw delete allow 80 || {
         echo -e "\e[91mError: Failed to remove port 80 from firewall.\033[0m"
         exit 1
     }
+    sudo apache2ctl configtest || {
+        echo -e "\e[91mError: Apache configuration test failed.\033[0m"
+        exit 1
+    }
     sudo systemctl restart apache2 || {
-        echo -e "\e[91mError: Failed to restart Apache2 after SSL.\033[0m"
+        echo -e "\e[91mError: Failed to restart Apache2 after disabling port 80.\033[0m"
+        systemctl status apache2.service
         exit 1
     }
     echo -e "\e[92mSSL configured successfully on port 88. Port 80 disabled.\033[0m"

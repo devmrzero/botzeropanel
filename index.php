@@ -9,7 +9,7 @@ if (function_exists('fastcgi_finish_request')) {
 }
 
 ini_set('error_log', 'error_log');
-$version = "4.13.6";
+$version = "4.14.3";
 date_default_timezone_set('Asia/Tehran');
 require_once 'config.php';
 require_once 'botapi.php';
@@ -315,7 +315,7 @@ if ($text == $datatextbot['text_Purchased_services'] || $datain == "backorder" |
     $page = 1;
     $items_per_page = 10;
     $start_index = ($page - 1) * $items_per_page;
-    $stmt = $pdo->prepare("SELECT * FROM invoice WHERE id_user = :id_user AND (status = 'active' OR status = 'end_of_time'  OR status = 'end_of_volume' OR status = 'sendedwarn') ORDER BY username ASC LIMIT $start_index, $items_per_page");
+    $stmt = $pdo->prepare("SELECT * FROM invoice WHERE id_user = :id_user AND (status = 'active' OR status = 'end_of_time'  OR status = 'end_of_volume' OR status = 'sendedwarn') ORDER BY time_sell DESC LIMIT $start_index, $items_per_page");
     $stmt->bindParam(':id_user', $from_id);
     $stmt->execute();
     $keyboardlists = [
@@ -367,7 +367,7 @@ if ($datain == 'next_page') {
         $next_page = $page + 1;
     }
     $start_index = ($next_page - 1) * $items_per_page;
-    $stmt = $pdo->prepare("SELECT * FROM invoice WHERE id_user = :id_user AND (status = 'active' OR status = 'end_of_time'  OR status = 'end_of_volume' OR status = 'sendedwarn') ORDER BY username ASC LIMIT $start_index, $items_per_page");
+    $stmt = $pdo->prepare("SELECT * FROM invoice WHERE id_user = :id_user AND (status = 'active' OR status = 'end_of_time'  OR status = 'end_of_volume' OR status = 'sendedwarn') ORDER BY time_sell DESC LIMIT $start_index, $items_per_page");
     $stmt->bindParam(':id_user', $from_id);
     $stmt->execute();
     $keyboardlists = [
@@ -413,7 +413,7 @@ if ($datain == 'next_page') {
         $next_page = $page - 1;
     }
     $start_index = ($next_page - 1) * $items_per_page;
-    $stmt = $pdo->prepare("SELECT * FROM invoice WHERE id_user = :id_user AND (status = 'active' OR status = 'end_of_time'  OR status = 'end_of_volume' OR status = 'sendedwarn') ORDER BY username ASC LIMIT $start_index, $items_per_page");
+    $stmt = $pdo->prepare("SELECT * FROM invoice WHERE id_user = :id_user AND (status = 'active' OR status = 'end_of_time'  OR status = 'end_of_volume' OR status = 'sendedwarn') ORDER BY time_sell DESC LIMIT $start_index, $items_per_page");
     $stmt->bindParam(':id_user', $from_id);
     $stmt->execute();
     $keyboardlists = [
@@ -599,10 +599,10 @@ if (preg_match('/product_(\w+)/', $datain, $dataget)) {
                 ]
             ]
         ]);
-        $textinfo = sprintf($textbotlang['users']['stateus']['InfoSerivceDisable'],$status_var,$DataUserOut['username'],$nameloc['Service_location'],$nameloc['id_invoice'],$usedTrafficGb,$LastTraffic,$expirationDate,$day);
+        $textinfo = sprintf($textbotlang['users']['stateus']['InfoSerivceDisable'],$status_var,$DataUserOut['username'],$nameloc['Service_location'],$nameloc['id_invoice'],$LastTraffic,$usedTrafficGb,$expirationDate,$day);
 
     }else{
-        $keyboardsetting = json_encode([
+        $keyboardsetting = [
             'inline_keyboard' => [
                 [
                     ['text' => $textbotlang['users']['stateus']['linksub'], 'callback_data' => 'subscriptionurl_' . $username],
@@ -620,8 +620,11 @@ if (preg_match('/product_(\w+)/', $datain, $dataget)) {
                     ['text' => $textbotlang['users']['stateus']['backlist'], 'callback_data' => 'backorder'],
                 ]
             ]
-        ]);
-        $textinfo = sprintf($textbotlang['users']['stateus']['InfoSerivceActive'],$status_var,$DataUserOut['username'],$nameloc['Service_location'],$nameloc['id_invoice'],$lastonline,$usedTrafficGb,$LastTraffic,$expirationDate,$day);
+        ];
+        if($marzban_list_get['type'] == "wgdashboard")unset($keyboardsetting['inline_keyboard'][0][1]);
+        if($marzban_list_get['type'] == "wgdashboard")unset($keyboardsetting['inline_keyboard'][1][1]);
+        $keyboardsetting = json_encode($keyboardsetting);
+        $textinfo = sprintf($textbotlang['users']['stateus']['InfoSerivceActive'],$status_var,$DataUserOut['username'],$nameloc['Service_location'],$nameloc['id_invoice'],$lastonline,$LastTraffic,$usedTrafficGb,$expirationDate,$day);
     }
     Editmessagetext($from_id, $message_id, $textinfo, $keyboardsetting);
 }
@@ -631,7 +634,11 @@ if (preg_match('/subscriptionurl_(\w+)/', $datain, $dataget)) {
     $marzban_list_get = select("marzban_panel", "*", "name_panel", $nameloc['Service_location'], "select");
     $DataUserOut = $ManagePanel->DataUser($nameloc['Service_location'], $username);
     $subscriptionurl = $DataUserOut['subscription_url'];
-    $textsub = "<code>$subscriptionurl</code>";
+    if($marzban_list_get['type'] == "wgdashboard"){
+        $textsub = "";
+    }else{
+        $textsub = "<code>$subscriptionurl</code>";
+    }
     $randomString = bin2hex(random_bytes(2));
     $urlimage = "$from_id$randomString.png";
     $writer = new PngWriter();
@@ -649,6 +656,12 @@ if (preg_match('/subscriptionurl_(\w+)/', $datain, $dataget)) {
         'caption' => $textsub,
         'parse_mode' => "HTML",
     ]);
+    if($marzban_list_get['type'] == "wgdashboard"){
+        $urlimage = "{$marzban_list_get['inboundid']}_{$nameloc['username']}.conf";
+        file_put_contents($urlimage,$DataUserOut['subscription_url']);
+        sendDocument($from_id, $urlimage, $textbotlang['users']['buy']['configwg']);
+        unlink($urlimage);
+    }
     unlink($urlimage);
 } elseif (preg_match('/config_(\w+)/', $datain, $dataget)) {
     $username = $dataget[1];
@@ -823,6 +836,48 @@ if (preg_match('/subscriptionurl_(\w+)/', $datain, $dataget)) {
         );
         $ManagePanel->Modifyuser($user['Processing_value'], $nameloc['Service_location'], $config);
     }
+    elseif($marzban_list_get['type'] == "wgdashboard"){
+        $usernamepanel = $nameloc['username'];
+        $namepanel = $nameloc['Service_location'];
+        $datauser = get_userwg($usernamepanel, $namepanel);
+        allowAccessPeers($namepanel,$usernamepanel);
+        $count = 0;
+        foreach ($datauser['jobs'] as $jobsvolume){
+            if($jobsvolume['Field'] == "date"){
+                break;
+            }
+            $count +=1;
+        }
+        $datam = array(
+            "Job" => $datauser['jobs'][$count],
+        );
+        deletejob($namepanel,$datam);
+        $count = 0;
+        foreach ($datauser['jobs'] as $jobsvolume){
+            if($jobsvolume['Field'] == "total_data"){
+                break;
+            }
+            $count +=1;
+        }
+        $datam = array(
+            "Job" => $datauser['jobs'][$count],
+        );
+        deletejob($namepanel,$datam);
+
+        if(intval($product['Service_time']) == 0){
+            $newDate = 0;
+        }else{
+            $date = strtotime("+" . $product['Service_time'] . "day");
+            $newDate = strtotime(date("Y-m-d H:i:s", $date));
+        }
+        if($newDate != 0){
+            $newDate = date("Y-m-d H:i:s", $newDate);
+            setjob($namepanel,"date",$newDate,$datauser['id']);
+        }
+        setjob($namepanel,"total_data",$product['Volume_constraint'],$datauser['id']);
+
+
+    }
     $keyboardextendfnished = json_encode([
         'inline_keyboard' => [
             [
@@ -835,6 +890,7 @@ if (preg_match('/subscriptionurl_(\w+)/', $datain, $dataget)) {
     ]);
     $priceproductformat = number_format($product['price_product']);
     $balanceformatsell = number_format(select("user", "Balance", "id", $from_id, "select")['Balance']);
+    update("invoice","Status","active","id_invoice",$nameloc['id_invoice']);
     sendmessage($from_id, $textbotlang['users']['extend']['thanks'], $keyboardextendfnished, 'HTML');
     $text_report = sprintf($textbotlang['Admin']['Report']['extend'],$from_id,$username,$product['name_product'],$priceproductformat,$usernamepanel,$balanceformatsell,$nameloc['Service_location']);
     if (isset($setting['Channel_Report']) &&strlen($setting['Channel_Report']) > 0) {
@@ -950,6 +1006,27 @@ if (preg_match('/subscriptionurl_(\w+)/', $datain, $dataget)) {
         $datam = array(
             "volume" => $data_limit,
         );
+    }
+    elseif ($marzban_list_get['type'] == "wgdashboard") {
+        $data_limit = ($DataUserOut['data_limit']/pow(1024, 3)) + ($volume / $setting['Extra_volume']);
+        $datauser = get_userwg($nameloc['username'],$nameloc['Service_location']);
+        $count = 0;
+        foreach ($datauser['jobs'] as $jobsvolume){
+            if($jobsvolume['Field'] == "total_data"){
+                break;
+            }
+            $count +=1;
+        }
+        allowAccessPeers($nameloc['Service_location'],$nameloc['username']);
+        if(isset($datauser['jobs'][$count])){
+            $datam = array(
+                "Job" => $datauser['jobs'][$count],
+            );
+            deletejob($nameloc['Service_location'],$datam);
+        }else{
+            ResetUserDataUsagewg($datauser['id'], $nameloc['Service_location']);
+        }
+        setjob($nameloc['Service_location'],"total_data",$data_limit,$datauser['id']);
     }
     $ManagePanel->Modifyuser($user['Processing_value'], $marzban_list_get['name_panel'], $datam);
     $keyboardextrafnished = json_encode([
@@ -1149,9 +1226,6 @@ if ($user['step'] == "createusertest" || preg_match('/locationtests_(.*)/', $dat
     $output_config_link = "";
     if ($marzban_list_get['sublink'] == "onsublink") {
         $output_config_link = $dataoutput['subscription_url'];
-        $link_config = "            
-        {$textbotlang['users']['stateus']['linksub']}
-        $output_config_link";
     }
     if ($marzban_list_get['configManual'] == "onconfig") {
         foreach ($dataoutput['configs'] as $configs) {
@@ -1166,7 +1240,11 @@ if ($user['step'] == "createusertest" || preg_match('/locationtests_(.*)/', $dat
             ]
         ]
     ]);
-    $textcreatuser = sprintf($textbotlang['users']['buy']['createservicetest'],$username_ac,$marzban_list_get['name_panel'],$setting['time_usertest'],$setting['val_usertest'],$output_config_link,$text_config);
+    if($marzban_list_get['type'] == "wgdashboard"){
+        $textcreatuser = sprintf($textbotlang['users']['buy']['createservicewg'],$username_ac,$marzban_list_get['name_panel'],$setting['time_usertest'],$setting['val_usertest']);
+    }else{
+        $textcreatuser = sprintf($textbotlang['users']['buy']['createservicetest'],$username_ac,$marzban_list_get['name_panel'],$setting['time_usertest'],$setting['val_usertest'],$output_config_link,$text_config);
+    }
     if ($marzban_list_get['sublink'] == "onsublink") {
         $urlimage = "$from_id$randomString.png";
         $writer = new PngWriter();
@@ -1185,17 +1263,23 @@ if ($user['step'] == "createusertest" || preg_match('/locationtests_(.*)/', $dat
             'caption' => $textcreatuser,
             'parse_mode' => "HTML",
         ]);
+        if($marzban_list_get['type'] == "wgdashboard"){
+            $urlimage = "{$marzban_list_get['inboundid']}_{$dataoutput['username']}.conf";
+            file_put_contents($urlimage,$output_config_link);
+            sendDocument($from_id, $urlimage,$textbotlang['users']['buy']['configwg']);
+            unlink($urlimage);
+        }
         sendmessage($from_id, $textbotlang['users']['selectoption'], $keyboard, 'HTML');
         unlink($urlimage);
     } else {
-        sendmessage($from_id, $textcreatuser, $usertestinfo, 'HTML');
+        sendmessage($from_id, $textcreatuser, $Shoppinginfo, 'HTML');
         sendmessage($from_id, $textbotlang['users']['selectoption'], $keyboard, 'HTML');
     }
     step('home', $from_id);
     $limit_usertest = $user['limit_usertest'] - 1;
     update("user", "limit_usertest", $limit_usertest, "id", $from_id);
     step('home', $from_id);
-    $text_report = sprintf($textbotlang['Admin']['Report']['ReportTestCreate'],$username_ac,$user['username'],$from_id,$user['number'],$name_panel);
+    $text_report = sprintf($textbotlang['Admin']['Report']['ReportTestCreate'] ,$from_id,$username,$username_ac,$first_name,$marzban_list_get['name_panel'],$user['number']);
     if (isset($setting['Channel_Report']) &&strlen($setting['Channel_Report']) > 0) {
         sendmessage($setting['Channel_Report'], $text_report, null, 'HTML');
     }
@@ -1518,7 +1602,11 @@ if ($text == $datatextbot['text_sell'] || $datain == "buy" || $text == "/buy") {
             ]
         ]
     ]);
-    $textcreatuser = sprintf($textbotlang['users']['buy']['createservice'],$username_ac,$info_product['name_product'],$marzban_list_get['name_panel'],$info_product['Service_time'],$info_product['Volume_constraint'],$text_config,$link_config);
+    if($marzban_list_get['type'] == "wgdashboard"){
+        $textcreatuser = sprintf($textbotlang['users']['buy']['createservicewgbuy'],$username_ac,$info_product['name_product'],$marzban_list_get['name_panel'],$info_product['Service_time'],$info_product['Volume_constraint']);
+    }else{
+        $textcreatuser = sprintf($textbotlang['users']['buy']['createservice'],$username_ac,$info_product['name_product'],$marzban_list_get['name_panel'],$info_product['Service_time'],$info_product['Volume_constraint'],$text_config,$link_config);
+    }
     if ($marzban_list_get['sublink'] == "onsublink") {
         $urlimage = "$from_id$randomString.png";
         $writer = new PngWriter();
@@ -1537,6 +1625,12 @@ if ($text == $datatextbot['text_sell'] || $datain == "buy" || $text == "/buy") {
             'caption' => $textcreatuser,
             'parse_mode' => "HTML",
         ]);
+        if($marzban_list_get['type'] == "wgdashboard"){
+            $urlimage = "{$marzban_list_get['inboundid']}_{$dataoutput['username']}.conf";
+            file_put_contents($urlimage,$output_config_link);
+            sendDocument($from_id, $urlimage,$textbotlang['users']['buy']['configwg']);
+            unlink($urlimage);
+        }
         sendmessage($from_id, $textbotlang['users']['selectoption'], $keyboard, 'HTML');
         unlink($urlimage);
     }elseif ($marzban_list_get['config'] == "onconfig") {
@@ -1785,78 +1879,7 @@ if ($text == $datatextbot['text_Add_Balance'] || $text == "/wallet") {
         $textnowpayments = sprintf($textbotlang['users']['moeny']['iranpay'],$randomString,$pay_address,$trxprice,$pricetoman,$trx,$pricetoman);
         sendmessage($from_id, $textnowpayments, $paymentkeyboard, 'HTML');
     }
-    if ($datain == "perfectmoney") {
-        deletemessage($from_id, $message_id);
-        sendmessage($from_id, $textbotlang['users']['perfectmoney']['getvcode'], $backuser, 'HTML');
-        step('getvcodeuser', $from_id);
-    }
 
-}
-if ($user['step'] == "getvcodeuser") {
-    update("user", "Processing_value", $text, "id", $from_id);
-    step('getvnumbervuser', $from_id);
-    sendmessage($from_id, $textbotlang['users']['perfectmoney']['getvnumber'], $backuser, 'HTML');
-} elseif ($user['step'] == "getvnumbervuser") {
-    step('home', $from_id);
-    $Voucher = ActiveVoucher($user['Processing_value'], $text);
-    $lines = explode("\n", $Voucher);
-    foreach ($lines as $line) {
-        if (strpos($line, "Error:") !== false) {
-            $errorMessage = trim(str_replace("Error:", "", $line));
-            break;
-        }
-    }
-    if ($errorMessage == "Invalid ev_number or ev_code") {
-        sendmessage($from_id, $textbotlang['users']['perfectmoney']['invalidvcodeorev'], $keyboard, 'HTML');
-        return;
-    }
-    if ($errorMessage == "Invalid ev_number") {
-        sendmessage($from_id, $textbotlang['users']['perfectmoney']['invalid_ev_number'], $keyboard, 'HTML');
-        return;
-    }
-    if ($errorMessage == "Invalid ev_code") {
-        sendmessage($from_id, $textbotlang['users']['perfectmoney']['invalidvcode'], $keyboard, 'HTML');
-        return;
-    }
-    if (isset ($errorMessage)) {
-        sendmessage($from_id, $textbotlang['users']['perfectmoney']['errors'], null, 'HTML');
-        foreach ($admin_ids as $id_admin) {
-            $texterrors = "";
-            sendmessage($id_admin, sprintf($textbotlang['users']['moeny']['eror'],$texterrors,$form_id,$username), null, 'HTML');
-        }
-        return;
-    }
-    $Balance_id = select("user", "*", "id", $from_id, "select");
-    $startTag = "<td>VOUCHER_AMOUNT</td><td>";
-    $endTag = "</td>";
-    $startPos = strpos($Voucher, $startTag) + strlen($startTag);
-    $endPos = strpos($Voucher, $endTag, $startPos);
-    $voucherAmount = substr($Voucher, $startPos, $endPos - $startPos);
-    $USD = $voucherAmount * json_decode(file_get_contents('https://api.tetherland.com/currencies'), true)['data']['currencies']['USDT']['price'];
-    $USD = number_format($USD, 0);
-    update("Payment_report","payment_Status","paid","id_order",$Payment_report['id_order']);
-    $randomString = bin2hex(random_bytes(5));
-    $dateacc = date('Y/m/d H:i:s');
-    $payment_Status = "paid";
-    $Payment_Method = "perfectmoney";
-    if($user['Processing_value_tow'] == "getconfigafterpay"){
-        $invoice = "{$user['Processing_value_tow']}|{$user['Processing_value_one']}";
-    }else{
-        $invoice = "0|0";
-    }
-    $stmt = $pdo->prepare("INSERT INTO Payment_report (id_user, id_order, time, price, payment_Status, Payment_Method,invoice) VALUES (?, ?, ?, ?, ?, ?,?)");
-    $stmt->bindParam(1, $from_id);
-    $stmt->bindParam(2, $randomString);
-    $stmt->bindParam(3, $dateacc);
-    $stmt->bindParam(4, $USD);
-    $stmt->bindParam(5, $payment_Status);
-    $stmt->bindParam(6, $Payment_Method);
-    $stmt->bindParam(7, $invoice);
-    $stmt->execute();
-    DirectPayment($randomString);
-    update("user","Processing_value","0", "id",$Balance_id['id']);
-    update("user","Processing_value_one","0", "id",$Balance_id['id']);
-    update("user","Processing_value_tow","0", "id",$Balance_id['id']);
 }
 if (preg_match('/Confirmpay_user_(\w+)_(\w+)/', $datain, $dataget)) {
     $id_payment = $dataget[1];
@@ -1939,7 +1962,7 @@ if (preg_match('/Confirmpay_user_(\w+)_(\w+)/', $datain, $dataget)) {
     }
     $dateacc = date('Y/m/d H:i:s');
     $randomString = bin2hex(random_bytes(5));
-    $payment_Status = "Unpaid";
+    $payment_Status = "waiting";
     $Payment_Method = "cart to cart";
     if($user['Processing_value_tow'] == "getconfigafterpay"){
         $invoice = "{$user['Processing_value_tow']}|{$user['Processing_value_one']}";
